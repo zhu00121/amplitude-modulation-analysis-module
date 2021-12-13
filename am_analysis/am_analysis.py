@@ -6,6 +6,8 @@ import numpy as np
 import scipy.signal
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from spectrum import *
+from mtspec import mtspec, sine_psd
 
 def conv_m(a, b, mode='full'):
     """Convolve a vector with collection of vectors.
@@ -116,6 +118,7 @@ def epoching(data, samples_epoch, samples_overlap = 0):
 
     # Epoch shift   
     samples_shift = samples_epoch - samples_overlap
+     
 
     # Number of epochs
     n_epochs =  int(np.floor( (n_samples - samples_epoch) / float(samples_shift) ) + 1 )
@@ -428,6 +431,125 @@ def irfft(y, n=None, dim=None):
     return x
 
 
+def mtspec_psd(x, fs, n_fft=None, taper_function = 'taper_5' ,channel_names=None):
+    """ This function computes the PSD for one or a set of REAL signals.
+        
+    Parameters
+    ----------
+    x  : 1D array with shape (n_samples) or
+         2D array with shape (n_samples, n_channels)
+    fs : Sampling frequency 
+        in Hz
+    n_fft : Number of samples to compute the FFT
+            (Default = n_samples in array x)   
+    win_function : Window function applied to the signal 
+        (Default 'Hamming')
+    channel_names : Names of the signals
+        (Default Signal-XX with XX 1, 2, ... n_channels) 
+
+
+    Returns
+    -------
+    psd_data : Dictionary with PSD data, with the elements:
+       rFFT
+           First half of the FFT(x) (u), scaled by the Window RMS       
+       PSD
+           Power Spectrum Density (u^2 / Hz) 
+       fs
+           Sampling frequency (Hz)
+       freq_axis
+           Frequency axis for rFFT and PSD (Hz)
+       freq_delta
+           Frequency axis step (Hz)
+       n_samples
+           Number of samples of the signal or signals 'x'
+       n_fft
+           Number of elements utilized to perform FFT
+       win_function
+           Window applied to the data in 'x'
+       channel_names 
+           Names of channels
+    
+    """
+
+    # input 'x' as 2D matrix [samples, columns]
+    try:
+        x.shape[1]
+    except IndexError:
+        x = x[:, np.newaxis]
+    
+    win_function = 'hamming'
+    # number of samples and number of channels
+    n_samples, n_channels = x.shape
+    
+    # validate 'n_fft' argument
+    if n_fft is None:
+        n_fft = n_samples
+
+    # generate default channel names, if needed
+    if channel_names is None:
+        channel_names = []
+        for ic  in range (0 , n_channels):
+            icp = ic + 1
+            channel_names.append( str('Signal-%02d' % icp) )
+            
+    # windowing data --> No needed as multitaper does it for us
+    X_pwr = []
+    for ix_ in range(x.shape[1]):
+        x_ = x[:,ix_]
+        #calculate in different ways using the mtspec toolbox
+        if taper_function == 'taper_5':  
+            X_pwr_, freq = mtspec(x_, 1.0, 4.5, nfft = n_fft ,number_of_tapers=5)
+        elif taper_function == 'taper_quad':
+            X_pwr_, freq = mtspec(x_, 1.0, 4.5, nfft = n_fft ,number_of_tapers=5,quadratic=True)
+        elif taper_function == 'taper_sine':
+            X_pwr_, freq = mtspec(x_, 1.0, 4.5, nfft = n_fft ,number_of_tapers=5)
+
+        
+        X_pwr.append(X_pwr_)
+    
+    X_pwr = np.array(X_pwr).T
+    # power spectrum
+    # X_pwr = abs(np.multiply(Xt, np.conj(Xt)))
+    # X_pwr = X_pwr * (1/np.square(n_fft))
+
+    # adjust for even and odd number of elements
+    #if n_fft % 2 != 0:
+       # odd case
+       # n_freqs = (n_fft + 1) / 2
+       # double all frequency components except DC component 
+       # X_pwr[1:, :] = X_pwr[1:, :] * 2
+    
+    #else:
+       # even case 
+       # n_freqs = (n_fft / 2) + 1
+       # double all frequency components except DC and fs/2 components
+       # X_pwr[1:-1, :] = X_pwr[1:-1, :] * 2
+    
+    f_axis = freq*fs
+    # frequency axis step
+    f_delta = f_axis[1] - f_axis[0]
+    # scale PSD with the frequency step
+    psd = np.divide(X_pwr, f_delta)
+
+    # frequency axis for spectrum
+    #n_freqs = int(n_freqs)
+    #f_axis = np.asarray(range(0, n_freqs)) * f_delta
+    
+    # output 'psd_data' dictionary
+    psd_data = {}
+    psd_data['rFFT'] = np.sqrt(X_pwr)
+    psd_data['PSD'] = psd
+    psd_data['fs'] = fs
+    psd_data['freq_axis'] = f_axis
+    psd_data['freq_delta'] = f_delta
+    psd_data['n_samples'] = n_samples
+    psd_data['n_fft'] = n_fft
+    psd_data['win_function'] = win_function
+    psd_data['channel_names'] = channel_names
+    
+    return psd_data
+
 def rfft_psd(x, fs, n_fft=None, win_function = 'hamming', channel_names=None):
     """ This function computes the PSD for one or a set of REAL signals.
         
@@ -650,6 +772,7 @@ def strfft_spectrogram(x, fs, win_size, win_shift, n_fft=None, win_function='ham
     # number of samples and number of channels
     n_samples, n_channels = x.shape
     
+    
     # validate 'n_fft' argument    
     if n_fft is None:
         n_fft = win_size
@@ -664,7 +787,7 @@ def strfft_spectrogram(x, fs, win_size, win_shift, n_fft=None, win_function='ham
     # Create time vector 'time_vct' for signal 'x'
     time_vct = np.array(range(0, np.size(x, 0))) / fs
 
-    
+
     # epoch signal or signals 'x'
     x_epoched, _ , ix = epoching(x, win_size, win_size - win_shift)
 
@@ -903,6 +1026,162 @@ def iwavelet_spectrogram(spectrogram_data):
 
     return x
 
+def mtspec_modulation_spectrogram(x, fs, win_size, win_shift, fft_factor_y=None, win_function_y='hamming', fft_factor_x=None, taper_function_x='taper_quad', channel_names=None):
+    """Compute the Modulation Spectrogram using the Complex Morlet wavelet for one or a set of REAL signals 'x'.
+        
+    Parameters
+    ----------
+    x  : 1D array with shape (n_samples) or
+         2D array with shape (n_samples, n_channels)
+    fs : Sampling frequency 
+         in Hz
+    win_size :
+        Size of the sliding window for STFFF (samples)
+    win_shift :
+        Shift between consecutive windows (samples)   
+    fft_factor_y : Number of elements to perform the 1st FFT is given as:
+        n_fft_y  = fft_factor_y * n_samples, (default, fft_factor_y = 1)
+    win_function_y : Window to apply in the 1st FFT 
+        (Default 'Hamming')
+    fft_factor_x : Number of elements to perform the 2nd FFT is given as:
+        n_fft_x  = fft_factor_x * n_samples, (default, fft_factor_x = 1)
+    win_function_x : Window to apply in the 2nd rFFT 
+        (Default 'Hamming')   
+    n_fft : Number of samples to compute the FFT
+        (Default = n_samples in array x)   
+    channel_names : Names of the signals
+        (Default Signal-XX with XX 1, 2, ... n_channels) 
+
+    Returns
+    -------
+    modulation_spectrogram_data : Dictionary with Modulation Spectrogram data, with the elements:
+       rFFT_modulation_spectrogram
+           rFFT values for each window (u), scaled by the Window RMS       
+       power_modulation_spectrogram :
+           Power modulation spectrogram (u^2 / Hz) 
+       fs : 
+           Sampling frequency (Hz)
+       fs_mod : 
+           Sampling frequency of modulation-frequency (Hz)         
+       freq_axis :
+           Frequency axis for rFFT and PSD (Hz)
+       freq_delta :
+           Frequency axis step (Hz)
+       freq_mod_axis :
+           Modulation-frequency axis for rFFT_modspec and pwr_modspec (Hz)     
+       freq_mod_delta :
+           Modulation-frequency step (Hz)
+       win_size_samples :
+           Size of the sliding window for STFFF (samples)
+       win_shift_samples :
+           Shift between consecutive windows (samples)   
+       n_fft_y :
+           Number of elements utilized to perform the 1st FFT
+       n_fft_x :
+           Number of elements utilized to perform the 2nd FFT
+       win_function_y :
+           Window to apply in the 1st rFFT            
+       win_function_x :
+           Window to apply in the 2nd rFFT                      
+       n_windows :
+           Number of ST windows
+       n_samples :
+           Number of samples of the signal or signals 'x'
+       spectrogram_data : 
+           Dictionary with Spectrogram data
+       channel_names :
+           Names of channels
+    
+    """
+    # input 'x' as 2D matrix [samples, columns]
+    try:
+        x.shape[1]
+    except IndexError:
+        x = x[:, np.newaxis]
+    
+    # number of samples and number of channels
+    n_samples, n_channels = x.shape
+    
+    # validate 'fft_factor_y' argument    
+    if fft_factor_y is None:
+        fft_factor_y = 1
+        
+    # validate 'fft_factor_x' argument    
+    if fft_factor_x is None:
+        fft_factor_x = 1
+        
+    # number of elements for the 1st FFT
+    n_fft_y = fft_factor_y * win_size
+
+    
+    # compute STFFT spectrogram
+    spectrogram_data = strfft_spectrogram(x, fs, win_size, win_shift, n_fft_y, win_function_y, channel_names)
+    n_windows, n_freqs, n_channels = spectrogram_data['rFFT_spectrogram'].shape
+    # Number of elements for the 2nd FFT
+    n_fft_x =  fft_factor_x * n_windows
+
+    # generate default channel names, if needed
+    if channel_names is None:
+        channel_names = []
+        for ic  in range (0 , n_channels):
+            icp = ic + 1
+            channel_names.append( str('Signal-%02d' % icp) )
+            
+    # modulation sampling frequency
+    fs_mod = 1 / (win_shift / fs)
+
+    # the AM analysis is made in the Amplitude derived from the Power Spectrogram
+    for i_channel in range(0, n_channels):
+        # data to generate the Modulation Spectrogram
+        spectrogram_1ch = np.sqrt(spectrogram_data['power_spectrogram'][:,:,i_channel]) 
+
+        # compute 'rfft_psd' on each frequency timeseries
+        mod_psd_struct = mtspec_psd(spectrogram_1ch, fs_mod, n_fft_x, taper_function_x ,channel_names )
+        
+        if i_channel == 0:
+            # modulation frequency axis
+            fmod_ax = mod_psd_struct['freq_axis']
+            # modulation frequency delta
+            fmod_delta = mod_psd_struct['freq_delta']
+    
+            # initialize 'rFFT_modspec'  and 'pwr_modspec'
+            n_freqsmod = len(fmod_ax)
+            rFFT_modspec = np.zeros((n_freqs, n_freqsmod ,n_channels), dtype = complex)
+            pwr_modspec  = np.zeros((n_freqs, n_freqsmod ,n_channels))
+
+        # rFFT data
+        rFFT_modspec[:, :, i_channel] = mod_psd_struct['rFFT'].transpose()
+        # power data
+        pwr_modspec[:, :, i_channel] = mod_psd_struct['PSD'].transpose()
+
+    # scale 'pwr_modspec' by modulation-frequency delta
+    pwr_modspec = pwr_modspec / fmod_delta
+
+    # output 'modulation_spectrogram_data' structure
+    modulation_spectrogram_data = {}
+    modulation_spectrogram_data['strfft_spectrogram']=spectrogram_data
+    modulation_spectrogram_data['rFFT_modulation_spectrogram'] = rFFT_modspec
+    modulation_spectrogram_data['power_modulation_spectrogram'] = pwr_modspec
+    modulation_spectrogram_data['fs'] = fs
+    modulation_spectrogram_data['fs_mod'] = fs_mod
+    modulation_spectrogram_data['freq_axis'] = spectrogram_data['freq_axis']
+    modulation_spectrogram_data['freq_delta'] = spectrogram_data['freq_delta']
+    modulation_spectrogram_data['freq_mod_axis'] = fmod_ax
+    modulation_spectrogram_data['freq_mod_delta'] = fmod_delta
+    modulation_spectrogram_data['win_size_samples'] = win_size
+    modulation_spectrogram_data['win_shift_samples'] = win_shift
+    modulation_spectrogram_data['n_fft_y'] = n_fft_y
+    modulation_spectrogram_data['n_fft_x'] = n_fft_y
+    modulation_spectrogram_data['win_function_y'] = win_function_y
+    modulation_spectrogram_data['taper_function_x'] = taper_function_x
+    modulation_spectrogram_data['n_windows'] = n_windows 
+    modulation_spectrogram_data['n_samples'] = spectrogram_data['n_samples'] 
+    modulation_spectrogram_data['spectrogram_data'] = spectrogram_data
+    modulation_spectrogram_data['channel_names'] = channel_names
+    
+    return modulation_spectrogram_data
+
+
 def strfft_modulation_spectrogram(x, fs, win_size, win_shift, fft_factor_y=None, win_function_y='hamming', fft_factor_x=None, win_function_x='hamming', channel_names=None):
     """Compute the Modulation Spectrogram using the Complex Morlet wavelet for one or a set of REAL signals 'x'.
         
@@ -1014,6 +1293,7 @@ def strfft_modulation_spectrogram(x, fs, win_size, win_shift, fft_factor_y=None,
 
         # compute 'rfft_psd' on each frequency timeseries
         mod_psd_struct = rfft_psd(spectrogram_1ch, fs_mod, n_fft_x, win_function_x, channel_names )
+        
     
         if i_channel == 0:
             # modulation frequency axis
@@ -1036,6 +1316,7 @@ def strfft_modulation_spectrogram(x, fs, win_size, win_shift, fft_factor_y=None,
 
     # output 'modulation_spectrogram_data' structure
     modulation_spectrogram_data = {}
+    modulation_spectrogram_data['strfft_spectrogram']=spectrogram_data
     modulation_spectrogram_data['rFFT_modulation_spectrogram'] = rFFT_modspec
     modulation_spectrogram_data['power_modulation_spectrogram'] = pwr_modspec
     modulation_spectrogram_data['fs'] = fs
@@ -1047,7 +1328,7 @@ def strfft_modulation_spectrogram(x, fs, win_size, win_shift, fft_factor_y=None,
     modulation_spectrogram_data['win_size_samples'] = win_size
     modulation_spectrogram_data['win_shift_samples'] = win_shift
     modulation_spectrogram_data['n_fft_y'] = n_fft_y
-    modulation_spectrogram_data['n_fft_x'] = n_fft_x
+    modulation_spectrogram_data['n_fft_x'] = n_fft_y
     modulation_spectrogram_data['win_function_y'] = win_function_y
     modulation_spectrogram_data['win_function_x'] = win_function_x
     modulation_spectrogram_data['n_windows'] = n_windows 
@@ -1281,7 +1562,7 @@ def iwavelet_modulation_spectrogram(modulation_spectrogram_data):
 
     return x
 
-def plot_spectrogram_data(spectrogram_data, ix=None, t_range=None, f_range=None, c_range=None, c_map='viridis'):
+def plot_spectrogram_data(spectrogram_data, ix=None, t_range=None, f_range=None, c_range=None, c_map='inferno'):
     """ Plot the Power Spectrogram related to the `spectrogram_data`
         
     Parameters
@@ -1321,8 +1602,8 @@ def plot_spectrogram_data(spectrogram_data, ix=None, t_range=None, f_range=None,
         ax.yaxis.set_major_locator(ticker.AutoLocator())
         ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
              
-        plt.xlabel('fime (s)')
-        plt.ylabel('frequency (Hz)')
+        plt.xlabel('Time (s)',fontsize=18)
+        plt.ylabel('Frequency (Hz)',fontsize=18)
     
     
         if t_range is not None:
@@ -1346,7 +1627,7 @@ def plot_spectrogram_data(spectrogram_data, ix=None, t_range=None, f_range=None,
         pmesh.set_clim(vmin=clim[0], vmax=clim[1])
     
         plt.colorbar()
-        plt.title(title_str)
+        plt.title(title_str,fontsize=18)
         plt.draw()
 
     
@@ -1378,7 +1659,7 @@ def plot_spectrogram_data(spectrogram_data, ix=None, t_range=None, f_range=None,
     
 
 
-def plot_modulation_spectrogram_data(modulation_spectrogram_data, ix=None, f_range=None, modf_range=None, c_range=None, c_map='viridis'):
+def plot_modulation_spectrogram_data(modulation_spectrogram_data, ix=None, f_range=None, modf_range=None, c_range=None, c_map='inferno'):
     """ Plot the Power Modulation Spectrogram related to the `modulation_spectrogram_data`
         
     Parameters
@@ -1418,8 +1699,8 @@ def plot_modulation_spectrogram_data(modulation_spectrogram_data, ix=None, f_ran
         ax.yaxis.set_major_locator(ticker.AutoLocator())
         ax.yaxis.set_minor_locator(ticker.AutoMinorLocator())
              
-        plt.xlabel('modulation frequency (Hz)')
-        plt.ylabel('conventional frequency (Hz)')
+        plt.xlabel('Modulation frequency (Hz)',fontsize=18)
+        plt.ylabel('Conventional frequency (Hz)',fontsize=18)
     
     
         if modf_range is not None:
@@ -1443,7 +1724,7 @@ def plot_modulation_spectrogram_data(modulation_spectrogram_data, ix=None, f_ran
         pmesh.set_clim(vmin=clim[0], vmax=clim[1])
     
         plt.colorbar()
-        plt.title(title_str)
+        plt.title(title_str,fontsize=18)
         plt.draw()
       
     # validate 'ix' argument    
@@ -1571,7 +1852,7 @@ def plot_signal(x, fs, name=None):
     time_vector = np.arange(x.shape[0])/fs
     
     plt.plot(time_vector,x)
-    plt.xlabel('time (s)')
+    plt.xlabel('Time (s)')
     plt.xlim([time_vector.min(), time_vector.max()])
     
     if name is None:
