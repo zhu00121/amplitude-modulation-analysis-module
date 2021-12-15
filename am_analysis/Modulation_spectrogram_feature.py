@@ -222,7 +222,5 @@ def extract_mod_fea(glued_audio_list,fs):
                                                                 n_freq_bin=n_freq_bin)
     
     return mod_fea
-
-if __name__ == 'main':
     
 
