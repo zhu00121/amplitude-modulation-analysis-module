@@ -12,7 +12,7 @@ Created on Wed Mar 10 17:13:37 2021
 """
 
 import numpy as np
-import am_analysis as ama
+from . import am_analysis as ama
 from numba import jit
 from skimage.util.shape import view_as_windows
 
